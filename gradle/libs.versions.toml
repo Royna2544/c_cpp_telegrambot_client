@@ -20,7 +20,7 @@ fragmentKtx = "1.8.8"
 roomCompiler = "2.7.1"
 window = "1.4.0"
 room = "2.7.1"
-ksp = "2.1.21-2.0.1"
+ksp = "2.2.0-2.0.2"
 junitKtx = "1.2.1"
 
 [libraries]
