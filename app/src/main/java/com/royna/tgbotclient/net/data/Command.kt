@@ -10,6 +10,9 @@ enum class Command(val value: Int) {
     CMD_GET_UPTIME(6),
     CMD_TRANSFER_FILE(7),
     CMD_TRANSFER_FILE_REQUEST(8),
+    CMD_TRANSFER_FILE_CHUNK(9),
+    CMD_TRANSFER_FILE_CHUNK_RESPONSE(10),
+    CMD_TRANSFER_FILE_END(11),
 
     // Below are internal commands
     CMD_GET_UPTIME_CALLBACK(100),

@@ -2,23 +2,23 @@ package com.royna.tgbotclient.net
 
 import com.google.gson.Gson
 import com.royna.tgbotclient.datastore.ChatID
-import com.royna.tgbotclient.net.crypto.SHAPartial
+import com.royna.tgbotclient.net.crypto.AES
+import com.royna.tgbotclient.net.crypto.SHA
 import com.royna.tgbotclient.net.data.Command
 import com.royna.tgbotclient.net.data.GenericAck
 import com.royna.tgbotclient.net.data.GenericAckException
 import com.royna.tgbotclient.net.data.Packet
 import com.royna.tgbotclient.net.data.PayloadType
+import com.royna.tgbotclient.net.io.IWriteChannel
+import com.royna.tgbotclient.net.io.KtorIOAdapter
 import com.royna.tgbotclient.util.Logging
 import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.Connection
 import io.ktor.network.sockets.InetSocketAddress
 import io.ktor.network.sockets.aSocket
 import io.ktor.network.sockets.connection
-import io.ktor.utils.io.read
-import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.Dispatchers
 import java.io.File
-import java.nio.ByteBuffer
 
 class SocketContext {
     private suspend fun openConnection() : Connection {
@@ -32,74 +32,53 @@ class SocketContext {
 
     private suspend fun doOpenSession(channels: Connection) = runCatching {
         Logging.debug("Opened connection")
-        var mSessionToken = String(ByteArray(Packet.SESSION_TOKEN_LENGTH))
-        val openSessionPacket = Packet.create(
-            command = Command.CMD_OPEN_SESSION,
-            payloadType = PayloadType.Binary,
-            sessionToken = mSessionToken
-        ).getOrElse {
-            Logging.error("Failed to create packet", it)
-            throw RuntimeException("Failed to create packet")
-        }
+        var mSessionToken = String(ByteArray(Packet.Header.SESSION_TOKEN_LENGTH))
 
-        channels.output.writeFully(openSessionPacket)
-        channels.output.flush()
-        Logging.debug("Wrote CMD_OPEN_SESSION")
+        Packet(
+            header = Packet.Header(
+                command = Command.CMD_OPEN_SESSION,
+                payloadType = PayloadType.Binary,
+                sessionToken = mSessionToken,
+                initVector = AES.generateIV(),
+                length = 0
+            ),
+            payload = null
+        ).write(KtorIOAdapter(channels))
 
-        lateinit var header : Packet
-        channels.input.read(Packet.PACKET_HEADER_LEN) { bytebuffer ->
-            header = Packet.fromByteBuffer(bytebuffer).getOrThrow()
-            if (header.command != Command.CMD_OPEN_SESSION_ACK) {
-                Logging.error("Invalid response: ${header.command}")
-                throw RuntimeException("Invalid response")
-            }
-            Logging.debug("Read CMD_OPEN_SESSION_ACK")
-            mSessionToken = header.sessionToken
-            Logging.debug("Got session token: $mSessionToken")
+        val packet = Packet.read(KtorIOAdapter(channels)).getOrThrow()
+        if (packet.header.command != Command.CMD_OPEN_SESSION_ACK) {
+            Logging.error("Invalid response: ${packet.header.command}")
+            throw RuntimeException("Invalid response")
         }
-        // Process payload
-        channels.input.read(Packet.PACKET_HEADER_LEN) { bytebuffer ->
-            Packet.readPayload(bytebuffer, header).onSuccess {
-                header.payload = it
-            }.getOrThrow()
-        }
-        Logging.info("Opened session")
+        Logging.debug("Read CMD_OPEN_SESSION_ACK")
+        mSessionToken = packet.header.sessionToken
+        Logging.debug("Got session token: $mSessionToken")
         mSessionToken
     }
 
     private suspend fun closeSession(channels: Connection, mSessionToken: String) {
-        val closeSessionPacket = Packet.create(
-            command = Command.CMD_CLOSE_SESSION,
-            payloadType = PayloadType.Binary,
-            sessionToken = mSessionToken
-        ).getOrElse {
-            Logging.error("Failed to create packet", it)
-            throw RuntimeException("Failed to create packet")
-        }
-        channels.output.writeFully(closeSessionPacket)
-        channels.output.flush()
-        Logging.debug("Wrote CMD_CLOSE_SESSION")
+        Packet(
+            header = Packet.Header(
+                command = Command.CMD_CLOSE_SESSION,
+                payloadType = PayloadType.Binary,
+                sessionToken = mSessionToken,
+                initVector = AES.generateIV(),
+                length = 0
+            ),
+            payload = null
+        ).write(KtorIOAdapter(channels))
     }
 
     private suspend fun readGenericAck(channels: Connection) = runCatching {
-        lateinit var header : Packet
-        channels.input.read(Packet.PACKET_HEADER_LEN) { bytebuffer ->
-            header = Packet.fromByteBuffer(bytebuffer).getOrThrow()
-            require(header.command == Command.CMD_GENERIC_ACK) {
-                "Invalid response: ${header.command}"
-            }
-        }
-        Logging.debug("Read generic ack")
 
-        lateinit var payload : ByteArray
-        // Process payload
-        channels.input.read(header.length) { bytebuffer ->
-            Packet.readPayload(bytebuffer, header).onSuccess {
-                payload = it
-            }.getOrThrow()
+        val packet = Packet.read(KtorIOAdapter(channels)).getOrThrow()
+        require(packet.header.command == Command.CMD_GENERIC_ACK) {
+            "Invalid response: ${packet.header.command}"
         }
-        Logging.debug("Payload: ${payload.decodeToString()}")
-        GenericAck.fromJson(payload.decodeToString())
+        require (packet.payloadSize != 0)
+        Logging.debug("Read generic ack")
+        Logging.debug("Payload: ${packet.payload.decodeToString()}")
+        GenericAck.fromJson(packet.payload.decodeToString())
     }
 
     enum class UploadOption(val value: Int) {
@@ -116,18 +95,17 @@ class SocketContext {
             Logging.error("Failed to open session", it)
         }.getOrThrow()
 
-        val sendMessagePacket = Packet.create(
-            Command.CMD_WRITE_MSG_TO_CHAT_ID,
-            PayloadType.Json,
-            sessionToken,
-            Gson().toJson(SendMessageData(chatId, message)).toByteArray())
-        .getOrElse {
-            Logging.error("Failed to create packet", it)
-            throw it
-        }
-        channels.output.writeFully(sendMessagePacket)
-        channels.output.flush()
-        Logging.debug("Wrote CMD_SEND_FILE_TO_CHAT_ID")
+        val payload = Gson().toJson(SendMessageData(chatId, message)).toByteArray()
+        Packet(
+            Packet.Header(
+                command = Command.CMD_WRITE_MSG_TO_CHAT_ID,
+                payloadType = PayloadType.Json,
+                length = payload.size,
+                sessionToken = sessionToken,
+                initVector = AES.generateIV(),
+            ),
+            payload = payload
+        ).write(KtorIOAdapter(channels))
         readGenericAck(channels).onSuccess {
             if (!it.success()) {
                 throw GenericAckException(it)
@@ -145,37 +123,28 @@ class SocketContext {
              Logging.error("Failed to open session", it)
          }.getOrThrow()
 
-         val sendMessagePacket = Packet.create(
-             Command.CMD_GET_UPTIME,
-             PayloadType.Json,
-             sessionToken
-         ).getOrElse {
-             Logging.error("Failed to create packet", it)
-             throw it
-         }
-         channels.output.writeFully(sendMessagePacket)
-         channels.output.flush()
-         Logging.debug("Wrote CMD_GET_UPTIME")
+         Packet(
+             header = Packet.Header (
+                 command = Command.CMD_GET_UPTIME,
+                 payloadType = PayloadType.Json,
+                 length = 0,
+                 sessionToken = sessionToken,
+                 initVector = AES.generateIV()
+             ),
+             payload = null
+         ).write(KtorIOAdapter(channels))
 
          var result: GetUptimeData? = null
          // Read the ACK
          runCatching {
-             lateinit var header : Packet
-             channels.input.read(Packet.PACKET_HEADER_LEN) { bytebuffer ->
-                 header = Packet.fromByteBuffer(bytebuffer).getOrThrow()
-                 require(header.command == Command.CMD_GET_UPTIME_CALLBACK) {
-                     "Invalid response: ${header.command}"
-                 }
+             val packet = Packet.read(KtorIOAdapter(channels)).getOrThrow()
+             require(packet.header.command == Command.CMD_GET_UPTIME_CALLBACK) {
+                 "Invalid response: ${packet.header.command}"
              }
-             Logging.debug("Read ${header.command}")
+             require (packet.header.length != 0)
+             Logging.debug("Read ${packet.header.command}")
 
-             lateinit var payload : ByteArray
-             channels.input.read(header.length) { bytebuffer ->
-                 Packet.readPayload(bytebuffer, header).onSuccess {
-                     payload = it
-                 }.getOrThrow()
-             }
-             val str = payload.decodeToString()
+             val str = packet.payload!!.decodeToString()
              Logging.debug("Payload: $str")
              result = Gson().fromJson(str, GetUptimeData::class.java)
              if (result == null) {
@@ -219,11 +188,18 @@ class SocketContext {
             UploadOption.ALWAYS -> Pair(true, true)
         }
         val fileBuf = sourcePath.readBytes()
-        val hash = SHAPartial().create(fileBuf).toString()
+        Logging.debug("File size: ${fileBuf.size}")
+
+        val sha = SHA()
+        // TODO: Split-compute sha
+        sha.update(fileBuf)
+        val hash = sha.done()
+        Logging.debug("Hash: $hash")
+
         val data = TransferFileData(
             destfilepath = destPath,
             srcfilepath = sourcePath.absolutePath,
-            hash = hash,
+            hash = hash.toString(),
             options = TransferFileData.Options(
                 overwrite = overwrite,
                 hash_ignore = hash_ignore,
@@ -231,20 +207,20 @@ class SocketContext {
             )
         )
 
-        val uploadDryPacket = Packet.create(
-            Command.CMD_TRANSFER_FILE,
-            PayloadType.Json,
-            sessionToken,
-            Gson().toJson(data).toByteArray().also {
-                Logging.debug("Payload: ${it.decodeToString()}")
-            }
-        )
+        val payload = Gson().toJson(data).toByteArray().also {
+            Logging.debug("Payload: ${it.decodeToString()}")
+        }
 
-        channels.output.writeFully(uploadDryPacket.getOrElse {
-            Logging.error("Failed to create CMD_TRANSFER_FILE packet", it)
-            throw it
-        })
-        channels.output.flush()
+        val uploadDryPacket = Packet(
+            header = Packet.Header(
+                command = Command.CMD_TRANSFER_FILE,
+                payloadType = PayloadType.Json,
+                length = payload.size,
+                sessionToken = sessionToken,
+                initVector = AES.generateIV()
+            ),
+            payload = payload
+        ).write(KtorIOAdapter(channels))
         Logging.debug("Wrote CMD_TRANSFER_FILE")
 
         readGenericAck(channels).onSuccess {
@@ -252,21 +228,23 @@ class SocketContext {
                 data.options.dry_run = false
                 val jsonPayload = Gson().toJson(data).toByteArray()
                 Logging.debug("Payload: ${jsonPayload.decodeToString()}, size: ${jsonPayload.size}")
-                val uploadPkt = Packet.create(
-                    Command.CMD_TRANSFER_FILE,
-                    PayloadType.Json,
-                    sessionToken,
-                    ByteBuffer.allocate(jsonPayload.size + fileBuf.size + 1).apply {
-                        put(jsonPayload)
-                        put(0xFFu.toByte())
-                        put(fileBuf)
-                    }.array()
-                ).getOrElse { thr ->
-                    Logging.error("Failed to create CMD_TRANSFER_FILE packet", thr)
-                    throw thr
+                val payloadCallback : suspend (channel: IWriteChannel) -> Unit = {
+                    channel : IWriteChannel ->
+                    channel.put(jsonPayload)
+                    channel.putByte(0xFFu.toByte())
+                    channel.put(fileBuf)
                 }
-                channels.output.writeFully(uploadPkt)
-                channels.output.flush()
+                Packet(
+                    header = Packet.Header(
+                        command = Command.CMD_TRANSFER_FILE,
+                        payloadType = PayloadType.Json,
+                        length = jsonPayload.size + fileBuf.size + 1,
+                        sessionToken = sessionToken,
+                        initVector = AES.generateIV()
+                    ),
+                    payloadFn = payloadCallback,
+                    payloadSize = jsonPayload.size + fileBuf.size + 1
+                ).write(KtorIOAdapter(channels))
                 Logging.debug("Wrote CMD_TRANSFER_FILE")
                 readGenericAck(channels).onFailure { fail ->
                     Logging.error("Failed to read generic ack", fail)
@@ -298,50 +276,40 @@ class SocketContext {
             )
         )
 
-        val transferRequest = Packet.create(
-            Command.CMD_TRANSFER_FILE_REQUEST,
-            PayloadType.Json,
-            sessionToken,
-            Gson().toJson(data).toByteArray().also {
-                Logging.debug("Payload: ${it.decodeToString()}")
-            }
-        )
-        channels.output.writeFully(transferRequest.getOrElse {
-            Logging.error("Failed to create CMD_TRANSFER_FILE_REQUEST packet", it)
-            throw it
-        })
-        channels.output.flush()
+        val sendData = Gson().toJson(data).toByteArray().also {
+            Logging.debug("Payload: ${it.decodeToString()}")
+        }
+        Packet(
+            Packet.Header(
+                Command.CMD_TRANSFER_FILE_REQUEST,
+                PayloadType.Json,
+                sendData.size,
+                sessionToken,
+                AES.generateIV()
+            ),
+            sendData
+        ).write(KtorIOAdapter(channels))
         Logging.debug("Wrote CMD_TRANSFER_FILE_REQUEST")
 
-        lateinit var header : Packet
-        channels.input.read(Packet.PACKET_HEADER_LEN) { bytebuffer ->
-            header = Packet.fromByteBuffer(bytebuffer).getOrThrow()
-            require(header.command == Command.CMD_TRANSFER_FILE || header.command == Command.CMD_GENERIC_ACK) {
-                "Invalid response: ${header.command}"
-            }
+        val packet = Packet.read(KtorIOAdapter(channels)).getOrThrow()
+        require(packet.header.command == Command.CMD_TRANSFER_FILE || packet.header.command == Command.CMD_GENERIC_ACK) {
+            "Invalid response: ${packet.header.command}"
         }
-        Logging.debug("Read ${header.command}")
+        Logging.debug("Read ${packet.header.command}")
 
-        lateinit var payload : ByteArray
-        // Process payload
-        channels.input.read(header.length) { bytebuffer ->
-            Packet.readPayload(bytebuffer, header).onSuccess {
-                payload = it
-            }.getOrThrow()
-        }
-        when (header.command) {
+        when (packet.header.command) {
             Command.CMD_GENERIC_ACK -> {
-                val ack = GenericAck.fromJson(payload.decodeToString())
+                val ack = GenericAck.fromJson(packet.payload.decodeToString())
                 if (!ack.success()) {
                     throw GenericAckException(ack)
                 }
             }
             Command.CMD_TRANSFER_FILE -> {
-                val jsonDataOffset = payload.indexOfFirst {
+                val jsonDataOffset = packet.payload.indexOfFirst {
                     it == 0xFF.toByte()
                 }
-                val jsonData = payload.sliceArray(0 until jsonDataOffset)
-                val fileData = payload.sliceArray(jsonDataOffset + 1 until payload.size)
+                val jsonData = packet.payload.sliceArray(0 until jsonDataOffset)
+                val fileData = packet.payload.sliceArray(jsonDataOffset + 1 until packet.payload.size)
                 Logging.debug("Payload: ${jsonData.decodeToString()}")
                 Logging.debug("File size: ${fileData.size}")
                 File(destPath).writeBytes(fileData)

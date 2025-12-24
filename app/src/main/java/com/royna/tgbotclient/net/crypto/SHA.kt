@@ -2,7 +2,7 @@ package com.royna.tgbotclient.net.crypto
 
 import java.security.MessageDigest
 
-class SHAPartial {
+class SHA : ISequenceData<Unit, SHA.SHAResult> {
     private val sha256 = MessageDigest.getInstance("SHA-256")
 
     data class SHAResult(val hash: ByteArray) {
@@ -34,8 +34,16 @@ class SHAPartial {
         }
     }
 
-    fun create(payload: ByteArray): SHAResult {
-        sha256.update(payload)
+
+    override fun update(data: ByteArray) {
+        sha256.update(data)
+    }
+
+    override fun update(data: ByteArray, inputOffset: Int, inputLength: Int) {
+        sha256.update(data, inputOffset, inputLength)
+    }
+
+    override fun done(): SHAResult {
         return SHAResult(sha256.digest())
     }
 }
