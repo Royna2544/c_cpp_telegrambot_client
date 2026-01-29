@@ -5,7 +5,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.lifecycleScope
-import com.royna.tgbotclient.net.SocketContext
+import com.royna.tgbotclient.data.BotRepository
 import com.royna.tgbotclient.util.FileUtils.copyToExt
 import com.royna.tgbotclient.util.FileUtils.getFileExtension
 import com.royna.tgbotclient.util.FileUtils.queryFileName
@@ -52,7 +52,7 @@ class UploadFileViewModel : ViewModel() {
 
         val name = queryFileName(activity.contentResolver,contentUri) ?: fileName
         Logging.info("Uploading file as : $name")
-        SocketContext.getInstance().uploadFile(tempFile, name).getOrThrow()
+        BotRepository.getInstance().uploadFile(tempFile, name).getOrThrow()
     }
 
     fun execute(activity: FragmentActivity) {

@@ -3,7 +3,7 @@ package com.royna.tgbotclient.ui.commands.uptime
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.royna.tgbotclient.net.SocketContext
+import com.royna.tgbotclient.data.BotRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -22,9 +22,9 @@ class UptimeViewModel : ViewModel() {
             val result : String
             _fetchInProgress.postValue(true)
             withContext(Dispatchers.IO) {
-                SocketContext.getInstance().getUptime()
+                BotRepository.getInstance().getBotInfo()
             }.onSuccess {
-                result = it as String
+                result = "${it.uptime.hours}h ${it.uptime.minutes}m ${it.uptime.seconds}s"
                 _uptimeValue.postValue(result)
             }.onFailure {
                 _uptimeValue.postValue(it.message)

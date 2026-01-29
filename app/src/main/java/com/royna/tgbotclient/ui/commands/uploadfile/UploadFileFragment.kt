@@ -17,7 +17,6 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.preference.PreferenceManager
 import com.royna.tgbotclient.R
 import com.royna.tgbotclient.databinding.FragmentUploadFileBinding
-import com.royna.tgbotclient.net.SocketContext
 import com.royna.tgbotclient.ui.CurrentSettingFragment
 import com.royna.tgbotclient.util.FileUtils.queryFileName
 import kotlinx.coroutines.launch
@@ -59,32 +58,6 @@ class UploadFileFragment : Fragment() {
             vm.execute(requireActivity())
         }
         binding.uploadUploadButton.isEnabled = false
-        val pref = PreferenceManager.getDefaultSharedPreferences(requireContext())
-        fun updateOptionAndPref(option: SocketContext.UploadOption) {
-            SocketContext.getInstance().setUploadFileOptions(option)
-            pref.edit().putInt(UploadOptionPref, option.value).apply()
-        }
-        // Allowance level 1
-        binding.uploadOption1.setOnClickListener {
-            updateOptionAndPref(SocketContext.UploadOption.MUST_NOT_EXIST)
-        }
-        // Allowance level 2
-        binding.uploadOption2.setOnClickListener {
-            updateOptionAndPref(SocketContext.UploadOption.MUST_NOT_MATCH_CHECKSUM)
-        }
-        // Allowance level 3
-        binding.uploadOption3.setOnClickListener {
-            updateOptionAndPref(SocketContext.UploadOption.ALWAYS)
-        }
-        val kBindingMap = mapOf(
-            SocketContext.UploadOption.MUST_NOT_EXIST to binding.uploadOption1,
-            SocketContext.UploadOption.MUST_NOT_MATCH_CHECKSUM to binding.uploadOption2,
-            SocketContext.UploadOption.ALWAYS to binding.uploadOption3
-        )
-        pref.getUploadOption(UploadOptionPref, SocketContext.UploadOption.MUST_NOT_EXIST).let { num ->
-            kBindingMap[num]?.isChecked = true
-            updateOptionAndPref(num)
-        }
         lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 vm.uploadResult.collect { message ->
@@ -95,14 +68,6 @@ class UploadFileFragment : Fragment() {
         return root
     }
 
-    private fun SharedPreferences.getUploadOption(key: String, default: SocketContext.UploadOption):
-            SocketContext.UploadOption {
-        return getInt(key, default.value).let {
-            SocketContext.UploadOption.entries.find { ent ->
-                ent.value == it
-            }
-        } ?: default
-    }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)

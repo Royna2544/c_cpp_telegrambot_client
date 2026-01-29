@@ -8,8 +8,7 @@ import androidx.preference.EditTextPreference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.PreferenceManager
 import com.royna.tgbotclient.R
-import com.royna.tgbotclient.net.SocketContext
-import io.ktor.network.sockets.InetSocketAddress
+import com.royna.tgbotclient.data.BotRepository
 import java.net.UnknownHostException
 
 class TgClientSettings : PreferenceFragmentCompat() {
@@ -97,7 +96,7 @@ class TgClientSettings : PreferenceFragmentCompat() {
 
         private fun updateDestination(mInetConfig: InetConfig): Boolean {
             try {
-                SocketContext.getInstance().destination = InetSocketAddress(mInetConfig.mHostName, mInetConfig.mPort)
+                BotRepository.getInstance().destination = BotRepository.InetAddress(mInetConfig.mHostName, mInetConfig.mPort)
             } catch (e: UnknownHostException) {
                 Log.e(kTag, "Failed to update destination", e)
                 return false

@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.androidx.room)
     alias(libs.plugins.com.google.devtools.ksp)
     alias(libs.plugins.com.google.dagger.hilt.android)
+    alias(libs.plugins.com.google.protobuf)
 }
 
 android {
@@ -68,6 +69,38 @@ kotlin {
     }
 }
 
+protobuf {
+    protoc {
+        // Download the compiler artifact
+        artifact = "com.google.protobuf:protoc:${libs.versions.protoc.get()}"
+    }
+    plugins {
+        // Generator for Java gRPC classes
+        create("grpc") {
+            artifact = "io.grpc:protoc-gen-grpc-java:${libs.versions.grpc.get()}"
+        }
+        // Generator for Kotlin Coroutine-friendly gRPC classes
+        create("grpckt") {
+            artifact = "io.grpc:protoc-gen-grpc-kotlin:${libs.versions.grpckotlin.get()}:jdk8@jar"
+        }
+        create("java") {
+            artifact = "com.google.protobuf:protoc-gen-javalite:${libs.versions.protobuf.get()}"
+        }
+    }
+    generateProtoTasks {
+        all().forEach { task ->
+            task.builtins {
+                create("java") { option("lite") }
+                create("kotlin") { option("lite") }
+            }
+            task.plugins {
+                create("grpc") { option("lite") }
+                create("grpckt") { option("lite") }
+            }
+        }
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
@@ -85,8 +118,12 @@ dependencies {
     implementation(libs.androidx.documentfile)
     implementation(libs.hilt)
     implementation(libs.androidx.junit.ktx)
-    implementation(libs.ktor.network)
-    implementation(libs.google.gson)
+    implementation(libs.grpc.okhttp)
+    implementation(libs.grpc.protobuf.lite)
+    implementation(libs.grpc.stub)
+    implementation(libs.grpc.kotlin.stub)
+    implementation(libs.protobuf.kotlin.lite)
+    implementation(libs.javax.annotation.api)
 
     ksp(libs.androidx.room.compiler)
     ksp(libs.hilt.compiler)

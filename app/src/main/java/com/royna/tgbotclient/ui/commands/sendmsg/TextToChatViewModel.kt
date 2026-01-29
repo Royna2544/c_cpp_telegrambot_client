@@ -4,8 +4,8 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.royna.tgbotclient.data.BotRepository
 import com.royna.tgbotclient.datastore.IChatIDOperations
-import com.royna.tgbotclient.net.SocketContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -37,7 +37,7 @@ class TextToChatViewModel @Inject constructor(private val operation: IChatIDOper
     fun send(chat: Long, message: String) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                SocketContext.getInstance().sendMessage(chat, message)
+                BotRepository.getInstance().sendMessage(chat, message)
             }.onSuccess {
                 _sendResult.value = "Message sent"
             }.onFailure { e ->

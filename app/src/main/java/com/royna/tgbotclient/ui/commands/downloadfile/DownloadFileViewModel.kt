@@ -8,7 +8,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.lifecycleScope
-import com.royna.tgbotclient.net.SocketContext
+import com.royna.tgbotclient.data.BotRepository
 import com.royna.tgbotclient.util.FileUtils.copyFromExt
 import com.royna.tgbotclient.util.FileUtils.queryFileName
 import com.royna.tgbotclient.util.Logging
@@ -42,51 +42,69 @@ class DownloadFileViewModel : ViewModel() {
     fun setSourceFile(path: String) {
         _sourceFilePath.value = path
     }
-
     private fun openFile(activity: FragmentActivity): Uri {
-        val contentUri = _outFileUri.value!!
-        val outFile = File(_sourceFilePath.value!!)
-        val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(outFile.extension) ?: "application/octet-stream"
+        val contentUri = _outFileUri.value
+            ?: throw IllegalStateException("Output URI not selected")
+        val sourcePath = _sourceFilePath.value
+            ?: throw IllegalStateException("Source path not set")
+
+        val outFile = File(sourcePath)
+
+        // Logic: Create the file in the SAF directory
+        val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(outFile.extension)
+            ?: "application/octet-stream"
+
         val docFile = DocumentFile.fromTreeUri(activity, contentUri)?.run {
+            // If file exists, delete it so we can overwrite cleanly
             findFile(outFile.name)?.let {
-                Logging.info("Deleting existing file")
+                Logging.info("Deleting existing destination file")
                 it.delete()
             }
             createFile(mimeType, outFile.name)?.uri
         }
 
-        if (docFile == null) {
-            throw RuntimeException("Could not create file in the selected directory. Ensure you have write permissions.")
-        }
-        return docFile
+        return docFile ?: throw RuntimeException("Could not create file. Check write permissions.")
     }
 
     private suspend fun downloadFile(activity: FragmentActivity) = runCatching {
-        val docFile = openFile(activity)
-        val tempFile = File(activity.cacheDir, docFile.lastPathSegment ?: "tmp.bin")
-        tempFile.delete()
+        // 1. Prepare Local Destination (SAF)
+        val destinationUri = openFile(activity)
 
-        val downloadedFilePath = queryFileName(activity.contentResolver, docFile)!!
-        Logging.info("Downloading file as : $downloadedFilePath")
+        // 2. Prepare Temp Cache File (Buffer)
+        val tempFile = File(activity.cacheDir, "temp_download_${System.currentTimeMillis()}.bin")
+        if (tempFile.exists()) tempFile.delete()
 
-        SocketContext.getInstance().downloadFile(downloadedFilePath, tempFile.absolutePath).getOrElse {
-            Logging.error("Failed to download file", it)
-            tempFile.delete()
-            DocumentFile.fromSingleUri(activity, docFile)?.delete()
-            throw it
-        }
+        // 3. Identify Remote Path
+        // CRITICAL: Send the FULL path to the server, not just the filename
+        val remotePath = _sourceFilePath.value!!
+        Logging.info("Requesting remote file: $remotePath")
 
         try {
-            activity.contentResolver.openOutputStream(docFile)?.copyFromExt(FileInputStream(tempFile))
-        } catch (e: IOException) {
-            Logging.error("Failed to copy to destination", e)
+            // 4. Download to Temp File (gRPC)
+            BotRepository.getInstance().downloadFile(remotePath, tempFile).getOrThrow()
+
+            // 5. Copy Temp File -> SAF Destination
+            Logging.info("Copying to final destination...")
+            activity.contentResolver.openOutputStream(destinationUri)?.use { output ->
+                FileInputStream(tempFile).use { input ->
+                    input.copyTo(output)
+                }
+            }
+            Logging.info("Download complete.")
+
+        } catch (e: Exception) {
+            Logging.error("Download failed", e)
+
+            // CLEANUP ON FAILURE: Only delete the user's file if the download failed
+            DocumentFile.fromSingleUri(activity, destinationUri)?.delete()
             throw e
         } finally {
-            tempFile.delete()
-            DocumentFile.fromSingleUri(activity, docFile)?.delete()
+            // CLEANUP ALWAYS: Delete the internal temp cache file
+            if (tempFile.exists()) {
+                tempFile.delete()
+            }
         }
     }
-
     fun execute(activity: FragmentActivity) {
         activity.lifecycleScope.launch {
             withContext(Dispatchers.IO) {

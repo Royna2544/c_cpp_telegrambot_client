@@ -7,8 +7,8 @@ import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.royna.tgbotclient.R
+import com.royna.tgbotclient.data.BotRepository
 import com.royna.tgbotclient.databinding.FragmentCurrentSettingChildBinding
-import com.royna.tgbotclient.net.SocketContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -33,7 +33,7 @@ class CurrentSettingFragment : Fragment() {
 
    private fun update() = viewLifecycleOwner.lifecycleScope.launch {
         withContext(Dispatchers.IO) {
-            val info = SocketContext.getInstance().destination
+            val info = BotRepository.getInstance().destination
             val hostname = info.hostname
             val port = info.port
 
