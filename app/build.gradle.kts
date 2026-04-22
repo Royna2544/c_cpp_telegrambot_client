@@ -55,9 +55,10 @@ android {
             excludes += "META-INF/LICENSE-notice.md"
         }
     }
-    room {
-        schemaDirectory("$projectDir/schemas")
-    }
+}
+
+room {
+    schemaDirectory("$projectDir/schemas")
 }
 
 ksp {
